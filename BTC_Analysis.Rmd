@@ -495,6 +495,5 @@ schmidt <- urspTest(ecm[4:length(ecm)])
 print(schmidt)
 
 ```
-~~~~~~~~~~~~`
-1. set up time variable
+
 
