@@ -1,0 +1,500 @@
+---
+title: "Bitcoin Data with a Future Dummy"
+author: "Tram Nguyen"
+date: "4/9/2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## R code to run data on cryptocurrencies data
+```{r, echo=FALSE}
+library(readr)
+p <- read_csv("~/SP/ver4.csv")
+library(plyr)
+library(zoo)
+library(survey)
+library(lmtest)
+library(tseries)
+library(fUnitRoots)
+
+
+```
+
+```{r, echo=FALSE}
+
+# eliminate at most one independent variable from regression
+elim_regress_variable <- function(vars, elim="")
+{
+   for (i in 1:NROW(vars))
+   {
+      if(elim==vars[i])
+      {
+         vars_new <- vars[-i]
+      }
+   }
+   return(vars_new)
+}
+
+# eliminate variable from group listings
+elim_group_variable <- function(indep_var_groups, elim="")
+{
+   groups <- indep_var_groups
+
+   # find group with this possible elimination candidate
+   for (i in 1:NROW(groups))
+   {
+      grp <- groups[[i]]
+      grp_size <- NROW(grp)
+      for (j in 1:grp_size)
+      {
+         #print(grp[j])
+         if (!is.na(grp[j]) && elim==grp[j])
+         {
+            grp <- grp[-j]
+         }
+      }
+      groups[[i]] <- grp
+   }
+   return(groups)
+}
+
+
+# create regression string for lm() 
+create_regress_str <- function(dep_var, indep_var, long_term)
+{
+   str <- paste(dep_var," ~ ")
+   first <- 1
+   for (i in 1:NROW(indep_var))
+   {
+      if (first==1)
+      {
+         str <- paste(str,indep_var[i],sep="")
+         first <- 0
+      }
+      else
+      {
+         str <- paste(str,indep_var[i],sep=" + ")
+      }
+   }
+
+   for (i in 1:NROW(long_term))
+   {
+      str <- paste(str,long_term[i],sep=" + ")
+   }
+
+   return(str)
+}
+
+# automatically eliminate least significant variable making sure 
+# to retain at least one per group; stop when all are at least 
+# significant at 10% level or are last in respective groups.
+choose_elim_variable <- function(vars, groups, results)
+{
+   sig_level = 0.1
+   results_data <- results$coeff
+   probs <- results_data[,4]
+   prob_order <- order(probs,decreasing=TRUE)
+   
+   elim = "-1"
+   index = 1
+   max_probs <- NROW(probs)
+   #print(paste("max_probs: ",max_probs, sep=''))
+   #print(probs)
+   #print(prob_order)
+
+   repeat
+   {
+      if (index > max_probs) break
+
+      var_name <- names(probs[prob_order[index]])
+      var_value <- probs[[prob_order[index]]]
+      #print(paste("index=",index,sep=''))
+      #print(paste("var_name=",var_name,sep=''))
+      #print(paste("var_value=",var_value,sep=''))
+
+      # find group with this possible elimination candidate
+      for (i in 1:NROW(groups))
+      {
+         grp <- groups[[i]]
+         grp_size <- NROW(grp)
+         for (j in 1:grp_size)
+         {
+            if (grp[j] == var_name)
+            {
+               #print(grp[j])
+               if (grp_size > 1 && var_value > sig_level)
+               {
+                  return(var_name)
+               }
+            }
+         }
+      }
+      index <- index + 1
+   }
+
+   return(elim)
+}
+
+# make the input file a CSV file from your Excel spreadsheet, and write to the output file in sink().
+# you need to have the full directory name included!
+#goldc <- read.csv("1978.csv",header=TRUE)
+#sink("1978goldintg.pdf", type="output", split=TRUE)
+
+# import all data as time series and take logs if needed; the names after the dollar sign 
+
+nl_gg_btc <- ts(log(p$btc_per))
+nl_gg_eth <- ts(log(p$eth_per))
+nl_gg_ltc <- ts(log(p$ltc_per))
+nl_transact_count <- ts(log(p$txCount))
+nl_totalcoin <- ts(log(p$generatedCoins))
+nl_sum_vendor <-ts(log(p$sum))
+nl_cy_at <- ts(log(p$cyber_attack))
+nl_vix <- ts(log(p$`VIX Close`))
+nl_hash <- ts(log(p$hashrate))
+
+gg_btc <- lag(nl_gg_btc,-1)
+gg_eth <- lag(nl_gg_eth,-1)
+gg_ltc <- lag(nl_gg_ltc,-1)
+transact_count <- lag(nl_transact_count,-1)
+totalcoin <- lag(nl_totalcoin,-1)
+sum_vendor <-lag(nl_sum_vendor,-1)
+cy_at <- lag(nl_cy_at,-1)
+vix <- lag(nl_vix, -1)
+hash <- lag(nl_hash,-1)
+# are the column names in the spreadsheet (or *.csv file)
+nl_btc_lg <- ts(log(p$`price(USD)`))
+nl_eth_lg <- ts(log(p$`price(USD)_e_e`))
+nl_ltc_lg <- ts(log(p$`price(USD)_l`))
+btc_lg <- lag(nl_btc_lg,-1)
+eth_lg <- lag(nl_eth_lg,-1)
+ltc_lg <- lag(nl_ltc_lg,-1)
+
+# get first difference of each variable
+dBTC <- diff(btc_lg)
+dETH <- diff(eth_lg)
+dLTC <- diff(ltc_lg)
+dgg_btc <-diff(nl_gg_btc)
+dtransact_count <- diff(nl_transact_count)
+dtotalcoin <- diff(nl_totalcoin)
+dsum_vendor <- diff(nl_sum_vendor)
+dcy_at <- diff(nl_cy_at)
+dvix <- diff(nl_vix)
+
+# generate lag variables
+lBTC1 <- lag(dBTC,-1)
+lBTC2 <- lag(dBTC,-2)
+lBTC3 <- lag(dBTC,-3)
+lBTC4 <- lag(dBTC,-4)
+lBTC5 <- lag(dBTC,-5)
+lBTC6 <- lag(dBTC,-6)
+lBTC7 <- lag(dBTC,-7)
+lBTC8 <- lag(dBTC,-8)
+
+lETH1 <- lag(dETH,-1)
+lETH2 <- lag(dETH,-2)
+lETH3 <- lag(dETH,-3)
+lETH4 <- lag(dETH,-4)
+lETH5 <- lag(dETH,-5)
+lETH6 <- lag(dETH,-6)
+lETH7 <- lag(dETH,-7)
+lETH8 <- lag(dETH,-8)
+
+lLTC1 <- lag(dLTC,-1)
+lLTC2 <- lag(dLTC,-2)
+lLTC3 <- lag(dLTC,-3)
+lLTC4 <- lag(dLTC,-4)
+lLTC5 <- lag(dLTC,-5)
+lLTC6 <- lag(dLTC,-6)
+lLTC7 <- lag(dLTC,-7)
+lLTC8 <- lag(dLTC,-8)
+
+ltransact_count1 <- lag(dtransact_count,-1)
+ltransact_count2 <- lag(dtransact_count,-2)
+ltransact_count3 <- lag(dtransact_count,-3)
+ltransact_count4 <- lag(dtransact_count,-4)
+ltransact_count5 <- lag(dtransact_count,-5)
+ltransact_count6 <- lag(dtransact_count,-6)
+ltransact_count7 <- lag(dtransact_count,-7)
+ltransact_count8 <- lag(dtransact_count,-8)
+
+ltotalcoin1 <- lag(dtotalcoin,-1)
+ltotalcoin2 <- lag(dtotalcoin,-2)
+ltotalcoin3 <- lag(dtotalcoin,-3)
+ltotalcoin4 <- lag(dtotalcoin,-4)
+ltotalcoin5 <- lag(dtotalcoin,-5)
+ltotalcoin6 <- lag(dtotalcoin,-6)
+ltotalcoin7 <- lag(dtotalcoin,-7)
+ltotalcoin8 <- lag(dtotalcoin,-8)
+
+lgg_btc1 <- lag(dgg_btc,-1)
+lgg_btc2 <- lag(dgg_btc,-2)
+lgg_btc3 <- lag(dgg_btc,-3)
+lgg_btc4 <- lag(dgg_btc,-4)
+lgg_btc5 <- lag(dgg_btc,-5)
+lgg_btc6 <- lag(dgg_btc,-6)
+lgg_btc7 <- lag(dgg_btc,-7)
+lgg_btc8 <- lag(dgg_btc,-8)
+
+lcy_at1 <- lag(dcy_at,-1)
+lcy_at2 <- lag(dcy_at,-2)
+lcy_at3 <- lag(dcy_at,-3)
+lcy_at4 <- lag(dcy_at,-4)
+lcy_at5 <- lag(dcy_at,-5)
+lcy_at6 <- lag(dcy_at,-6)
+lcy_at7 <- lag(dcy_at,-7)
+lcy_at8 <- lag(dcy_at,-8)
+
+lvix1 <- lag(dvix,-1)
+lvix2 <- lag(dvix,-2)
+lvix3 <- lag(dvix,-3)
+lvix4 <- lag(dvix,-4)
+lvix5 <- lag(dvix,-5)
+lvix6 <- lag(dvix,-6)
+lvix7 <- lag(dvix,-7)
+lvix8 <- lag(dvix,-8)
+
+lsum_vendor1 <- lag(dsum_vendor,-1)
+lsum_vendor2 <- lag(dsum_vendor,-2)
+lsum_vendor3 <- lag(dsum_vendor,-3)
+lsum_vendor4 <- lag(dsum_vendor,-4)
+lsum_vendor5 <- lag(dsum_vendor,-5)
+lsum_vendor6 <- lag(dsum_vendor,-6)
+lsum_vendor7 <- lag(dsum_vendor,-7)
+lsum_vendor8 <- lag(dsum_vendor,-8)
+
+
+# create dependent variable string and vector of all long term variables
+dep_var = "dBTC"
+long_term <- c("btc_lg","eth_lg","ltc_lg","gg_btc", "transact_count", "totalcoin",
+                   "sum_vendor", "future", "cy_at","vix")
+
+# create vector of all independent variable names
+indep_vars <- c("dBTC","lBTC1","lBTC2","lBTC3","lBTC4","lBTC5","lBTC6","lBTC7","lBTC8",
+	"dETH",	"lETH1","lETH2","lETH3","lETH4","lETH5","lETH6","lETH7","lETH8",
+		"dLTC","lLTC1","lLTC2","lLTC3","lLTC4","lLTC5","lLTC6","lLTC7","lLTC8",
+	"dtransact_count",	"ltransact_count1","ltransact_count2","ltransact_count3","ltransact_count4","ltransact_count5","ltransact_count6","ltransact_count7","ltransact_count8",
+	"dtotalcoin"	,	"ltotalcoin1","ltotalcoin2","ltotalcoin3","ltotalcoin4","ltotalcoin5","ltotalcoin6","ltotalcoin7","ltotalcoin8",
+  "dgg_btc","lgg_btc1","lgg_btc2","lgg_btc3","lgg_btc4","lgg_btc5","lgg_btc6","lgg_btc7","lgg_btc8",
+  "dcy_at",	"lcy_at1","lcy_at2","lcy_at3","lcy_at4","lcy_at5","lcy_at6","lcy_at7","lcy_at8",
+  	"dvix","lvix1","lvix2","lvix3","lvix4","lvix5","lvix6","lvix7","lvix8",
+   "dsum_vendor", "lsum_vendor1","lsum_vendor2","lsum_vendor3","lsum_vendor4","lsum_vendor5","lsum_vendor6","lsum_vendor7","lsum_vendor8"
+		) 
+
+# create groups of independent variables such that at least one member of 
+# each group must remain when using Henry's general to specific elimination
+indep_vars_groups <- list(c("dBTC","lBTC1","lBTC2","lBTC3","lBTC4","lBTC5","lBTC6","lBTC7","lBTC8"),
+	c("dETH",	"lETH1","lETH2","lETH3","lETH4","lETH5","lETH6","lETH7","lETH8"),
+	c("dLTC","lLTC1","lLTC2","lLTC3","lLTC4","lLTC5","lLTC6","lLTC7","lLTC8"),
+	c("dtransact_count",	"ltransact_count1","ltransact_count2","ltransact_count3","ltransact_count4","ltransact_count5","ltransact_count6","ltransact_count7","ltransact_count8"),
+	c("dtotalcoin"	,	"ltotalcoin1","ltotalcoin2","ltotalcoin3","ltotalcoin4","ltotalcoin5","ltotalcoin6","ltotalcoin7","ltotalcoin8"),
+  c("dgg_btc","lgg_btc1","lgg_btc2","lgg_btc3","lgg_btc4","lgg_btc5","lgg_btc6","lgg_btc7","lgg_btc8"),
+  c("dcy_at",	"lcy_at1","lcy_at2","lcy_at3","lcy_at4","lcy_at5","lcy_at6","lcy_at7","lcy_at8"),
+  	c("dvix","lvix1","lvix2","lvix3","lvix4","lvix5","lvix6","lvix7","lvix8"),
+   c("dsum_vendor", "lsum_vendor1","lsum_vendor2","lsum_vendor3","lsum_vendor4","lsum_vendor5","lsum_vendor6","lsum_vendor7","lsum_vendor8")
+		) 
+                                              
+# create time series dataset including the dependent and all possible independent variables
+
+
+#DUMMY
+future<- ts(p$dum_future)
+#NEED TO LOOK AT DATE VARIABLE
+tsdata <- ts.union(dBTC,lBTC1, lBTC2,lBTC3,lBTC4,lBTC5,lBTC6,lBTC7,lBTC8,
+		dETH,lETH1,lETH2,lETH3,lETH4,lETH5,lETH6,lETH7,lETH8,
+		dLTC,lLTC1,lLTC2,lLTC3,lLTC4,lLTC5,lLTC6,lLTC7,lLTC8,
+		dtransact_count,ltransact_count1,ltransact_count2,ltransact_count3,ltransact_count4,ltransact_count5,ltransact_count6,ltransact_count7,ltransact_count8,
+	dtotalcoin,ltotalcoin1,ltotalcoin2,ltotalcoin3,ltotalcoin4,ltotalcoin5,ltotalcoin6,ltotalcoin7,ltotalcoin8,
+  dgg_btc,lgg_btc1,lgg_btc2,lgg_btc3,lgg_btc4,lgg_btc5,lgg_btc6,lgg_btc7,lgg_btc8,
+  dcy_at,	lcy_at1,lcy_at2,lcy_at3,lcy_at4,lcy_at5,lcy_at6,lcy_at7,lcy_at8,
+  dvix,lvix1,lvix2,lvix3,lvix4,lvix5,lvix6,lvix7,lvix8,
+  dsum_vendor,lsum_vendor1,lsum_vendor2,lsum_vendor3,lsum_vendor4,lsum_vendor5,lsum_vendor6,lsum_vendor7,lsum_vendor8, future,btc_lg, eth_lg, ltc_lg, transact_count, totalcoin, gg_btc, cy_at, vix, sum_vendor)
+
+# begin with a strin$g that sets up the regression equation with dependent variable 
+# followed by "~" and then ALL independent variables set
+#str <- create_regress_str(dep_var, long_term, indep_vars)
+str <- create_regress_str(dep_var,long_term, indep_vars)
+print(str)
+regress <- lm(str, data=tsdata)
+results <- summary(regress)
+print(results)
+
+# repeat regression eliminating one variable at a time for "elim" either by
+#  1. TESTING: enter variables until "-1" is entered in console for testing
+#  2. Calling choose_elim_variable() to eliminate completely through variables
+repeat
+{
+   #elim <- readline(paste("Which variable to eliminate (e.g. dlimp4 or -1 to end)?  ", sep=""))
+   elim <- choose_elim_variable(indep_vars, indep_vars_groups, results)
+   #print(elim)
+   if (elim=="-1") break
+   indep_vars <- elim_regress_variable(indep_vars, elim)
+   indep_vars_groups <- elim_group_variable(indep_vars_groups, elim)
+   str <- create_regress_str(dep_var, indep_vars, long_term)
+   regress <- lm(str, data=tsdata)
+   results <- summary(regress)
+}
+print(results)
+
+# RUN TESTS!!!
+#("lETH1","lLTC1","gg_btc", "transact_count", "totalcoin", "sum_vendor", "future", "cy_at")
+# Wald testgg_btc+transact_count+totalcoin+sum_vendor+future+ cy_at+
+wald <- regTermTest(regress, ~btc_lg+ eth_lg+ltc_lg+gg_btc+
+                      transact_count+totalcoin+sum_vendor+
+                      cy_at, method="Wald")
+print(wald)
+
+coeffs <- regress$coefficients
+coeff_c <- -coeffs["(Intercept)"]/coeffs["btc_lg"]
+coeff_lETH1 <- -coeffs["eth_lg"]/coeffs["btc_lg"]
+coeff_lLTC1 <- -coeffs["ltc_lg"]/coeffs["btc_lg"]
+coeff_gg <- -coeffs["gg_btc"]/coeffs["btc_lg"]
+coeff_tc <- -coeffs["transact_count"]/coeffs["btc_lg"]
+coeff_total <- -coeffs["totalcoin"]/coeffs["btc_lg"]
+coeff_vendor <- -coeffs["sum_vendor"]/coeffs["btc_lg"]
+coeff_future <- -coeffs["future"]/coeffs["btc_lg"]
+coeff_cyber <- -coeffs["cy_at"]/coeffs["btc_lg"]
+coeff_vix <- -coeffs["vix"]/coeffs["btc_lg"]
+
+
+# store standard errors in "stderrors"
+stderrors <- results$coefficients[,2]
+stderror_c <- stderrors["(Intercept)"]
+stderror_lETH1 <- stderrors["eth_lg"]
+stderror_lLTC1 <- stderrors["ltc_lg"]
+stderror_gg <- -stderrors["gg_btc"] 
+stderror_tc <- -stderrors["transact_count"] 
+stderror_total <- -stderrors["totalcoin"] 
+stderror_vendor <- -stderrors["sum_vendor"] 
+stderror_future <- -stderrors["future"] 
+stderror_cyber <- -stderrors["cy_at"] 
+stderror_vix <- -stderrors["vix"] 
+
+
+# store t-stats values in "tstats"
+tstats <- results$coefficients[,3]
+tstats_c <- tstats["(Intercept)"]
+tstats_lETH1 <- tstats["eth_lg"] 
+tstats_lLTC1 <- tstats["ltc_lg"] 
+tstats_gg <- -tstats["gg_btc"] 
+tstats_tc <- -tstats["transact_count"] 
+tstats_total <- -tstats["totalcoin"] 
+tstats_vendor <- -tstats["sum_vendor"]
+tstats_future <- -tstats["future"] 
+tstats_cyber <- -tstats["cy_at"] 
+tstats_vix <- -tstats["vix"] 
+
+# store probabilities in "probs"
+results_data <- results$coeff
+probs <- results_data[,4]
+probs_c <- probs["(Intercept)"]
+probs_lETH1 <- probs["eth_lg"]
+probs_lLTC1 <- probs["ltc_lg"]
+probs_gg <- -probs["gg_btc"] 
+probs_tc <- -probs["transact_count"] 
+probs_total <- -probs["totalcoin"] 
+probs_vendor <- -probs["sum_vendor"] 
+probs_future <- -probs["future"] 
+probs_cyber <- -probs["cy_at"]
+probs_vix <- -probs["vix"]
+
+
+# print ecm coeffs, std-errors, t-stats, and probs
+cat("Long Run Elasticities:\n")
+cat("Variable,","Coeff,","Std-Errors,","t-stat,","prob","\n")
+cat("(Intercept),",coeff_c,",",stderror_c,",",tstats_c,",",probs_c,"\n")
+cat("lETH1,",coeff_lETH1,",",stderror_lETH1,",",tstats_lETH1,",",probs_lETH1,",")
+cat("lLTC1,",coeff_lLTC1,",",stderror_lLTC1,",",tstats_lLTC1,",",probs_lLTC1,"\n\n")
+cat("BTC_searchterm,",coeff_gg,",",stderror_gg,",",tstats_gg,",",probs_gg,"\n\n")
+cat("Transaction Count,",coeff_tc,",",stderror_tc,",",tstats_tc,",",probs_tc,"\n\n")
+cat("Total Coin,",coeff_total,",",stderror_total,",",tstats_total,",",probs_total,"\n\n")
+cat("Vendors,",coeff_vendor,",",stderror_vendor,",",tstats_vendor,",",probs_vendor,"\n\n")
+cat("Futures Price,",coeff_future,",",stderror_future,",",tstats_future,",",probs_future,"\n\n")
+cat("Cyberattack searchteam \t",coeff_cyber,",",stderror_cyber,",",tstats_cyber,",",probs_cyber,"\n\n")
+cat("VIX Index,",coeff_vix,",",stderror_vix,",",tstats_vix,",",probs_vix,"\n\n")
+
+# create ecm solution for long-range approx.
+ecm <- btc_lg - coeff_c - coeff_lETH1 * nl_eth_lg - coeff_lLTC1*nl_ltc_lg - coeff_gg*nl_gg_btc - coeff_tc*nl_transact_count -  coeff_total*nl_totalcoin - coeff_vendor*nl_sum_vendor - coeff_future*future - coeff_cyber*nl_cy_at - coeff_vix*nl_vix
+
+#coeff_c = -47540.92, coeff_lETH1 = 
+
+ecm1 <- lag(ecm, -1)
+tsdata <- ts.union(dBTC,lBTC1, lBTC2,lBTC3,lBTC4,lBTC5,lBTC6,lBTC7,lBTC8,
+		dETH,lETH1,lETH2,lETH3,lETH4,lETH5,lETH6,lETH7,lETH8,
+		dLTC,lLTC1,lLTC2,lLTC3,lLTC4,lLTC5,lLTC6,lLTC7,lLTC8,
+		dtransact_count,ltransact_count1,ltransact_count2,ltransact_count3,ltransact_count4,ltransact_count5,ltransact_count6,ltransact_count7,ltransact_count8,
+	dtotalcoin,ltotalcoin1,ltotalcoin2,ltotalcoin3,ltotalcoin4,ltotalcoin5,ltotalcoin6,ltotalcoin7,ltotalcoin8,
+  dgg_btc,lgg_btc1,lgg_btc2,lgg_btc3,lgg_btc4,lgg_btc5,lgg_btc6,lgg_btc7,lgg_btc8,
+  dcy_at,	lcy_at1,lcy_at2,lcy_at3,lcy_at4,lcy_at5,lcy_at6,lcy_at7,lcy_at8,
+  dvix,lvix1,lvix2,lvix3,lvix4,lvix5,lvix6,lvix7,lvix8,
+  dsum_vendor,lsum_vendor1,lsum_vendor2,lsum_vendor3,lsum_vendor4,lsum_vendor5,lsum_vendor6,lsum_vendor7,lsum_vendor8, future,btc_lg, eth_lg, ltc_lg, transact_count, totalcoin, gg_btc, cy_at, vix, sum_vendor,
+	ecm1)
+
+# do FINAL regression WITH ecm
+long_term <-  "ecm1"
+
+str <- create_regress_str(dep_var, indep_vars, long_term)
+print(str)
+regress <- lm(str, data=tsdata)
+results <- summary(regress)
+print(str)
+print(regress)
+print(results)
+
+# Durbin-Watson test
+dw <- dwtest(regress,data=tsdata)
+print(dw)
+
+# Breusch-Godfrey test
+# bgtest(formula, order = 1, type = c("Chisq", "F"), data = list())
+bp <- bgtest(regress,order=4,type="F",data=tsdata)
+print(bp)
+
+# Ramsey RESET test, fitted with quadratic
+# resettest(formula, power = 2:3, type = c("fitted", "regressor", "princomp"), data = list())
+ramsey <- reset(regress, power=2:3, type="fitted", data=tsdata)
+print(ramsey)
+
+# White's heteroskedastic test
+#white <- vcovHC(regress, data=tsdata)
+#white <- summaryw(regress)
+#white <- ncv.test(regress)
+#print(white)
+#hetero_cov_mat <- hccm(regress)
+#print(hetero_cov_mat)
+
+# Jarque-Bera normality test
+# skip first 3 NA values because of volatility
+jarque_test <- jarque.bera.test(ecm[4:length(ecm)])
+print(jarque_test)
+
+# Dickey-Fuller unit root test
+# skip first 3 NA values because of volatility
+adf_test <- adf.test(ecm[4:length(ecm)])
+print(adf_test)
+
+# Unit root tests
+print("Unit Root Test")
+unitRootTest1 <- unitrootTest(ecm[4:length(ecm)],lags=4)
+print(unitRootTest1)
+
+# Augmented Dickey-Fuller test for unit roots using "urdfTest"
+dickey <- urdfTest(ecm[4:length(ecm)], lags=4)
+print(dickey)
+
+# Phillips-Perron test for unit roots
+phillips <- urppTest(ecm[4:length(ecm)], use.lag=4, doplot=TRUE)
+print(phillips)
+
+# Elliott-Rothenberg-Stock test for unit roots
+elliot <- urersTest(ecm[4:length(ecm)])
+print(elliot)
+
+# Schmidt-Phillips test for unit roots
+schmidt <- urspTest(ecm[4:length(ecm)])
+print(schmidt)
+
+```
+~~~~~~~~~~~~`
+1. set up time variable
+
